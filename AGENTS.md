@@ -6,6 +6,8 @@ All generations should be done concurrently.
 The first argument will be the script path. All output will be relative to the script path.
 
 Second argument (optional, defaults is 1) is the number of thumbnails to generate for each cross product of styles and concepts. For example, if 1, two styles and two concepts would yield 4 total thumbnails.
+
+`--provider` (optional) selects the image generation backend. Defaults to `nano-banana-pro`. Supported values: `nano-banana-pro` (alias `nano-banana`), `gpt-image-2`.
 # Frontmatter
 "concepts" is required. Styles is optional.
 
@@ -39,15 +41,15 @@ nailgun/123_sketch_logo_1.jpg
 nailgun/123_sketch_datacenter_1.jpg
 
 # Image Generation
-Interface should be generic such that new providers can be added easily. For now let's just support Google's nano banana pro.
+Interface should be generic such that new providers can be added easily. Supported providers: Google nano banana pro (default) and OpenAI GPT Image 2.
 
 # Development
 Rust binary. `cargo build` / `cargo test` / `cargo clippy --all-targets` must stay clean.
 
 - `src/main.rs` — CLI args, orchestration, prompt/filename building, concurrent generation
 - `src/frontmatter.rs` — `nailgun:` frontmatter parsing (concepts required, styles optional)
-- `src/provider.rs` — `ImageProvider` trait; add providers by implementing it and selecting them in `default_provider`. `generate` returns image bytes plus the extension matching the format the backend sent (no transcoding). The nano banana pro impl (`gemini-3-pro-image`) reads `GEMINI_API_KEY` (or `GOOGLE_API_KEY`); `NAILGUN_API_BASE` overrides the API base URL for tests/mocks
+- `src/provider.rs` — `ImageProvider` trait and `ProviderKind`; add providers by implementing the trait and selecting them in `from_kind`. `generate` returns image bytes plus the extension matching the format the backend sent (no transcoding). Nano banana pro (`gemini-3-pro-image`) reads `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). GPT Image 2 (`gpt-image-2`) reads `OPENAI_API_KEY` and requests 16:9 (`2048x1152`). `NAILGUN_API_BASE` overrides the API base URL for tests/mocks
 - `src/progress.rs` — live table (styles as columns, concepts as rows); plain event lines when stdout is not a TTY
 
 # Testing
-Unit tests (`src/**`) must never make live requests. Live API coverage is limited to `tests/live.rs`, which makes exactly ONE generation (~$0.13) and skips when no API key is set — keep its volume that low so `cargo test` stays cheap. `tests/pipeline.rs` covers the full binary against a localhost mock at zero cost.
+Unit tests (`src/**`) must never make live requests. Live API coverage is limited to `tests/live.rs`, which makes exactly ONE generation (~$0.13) against the default nano banana pro provider and skips when no API key is set — keep its volume that low so `cargo test` stays cheap. `tests/pipeline.rs` covers the full binary against a localhost mock at zero cost (default provider and `--provider gpt-image-2`).

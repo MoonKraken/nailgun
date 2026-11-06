@@ -64,7 +64,10 @@ impl Progress {
             Ok(()) => cell.done += 1,
             Err(e) => {
                 cell.failed += 1;
-                let label = format!("{} x {}: {e:#}", inner.styles[style], inner.concepts[concept]);
+                let label = format!(
+                    "{} x {}: {e:#}",
+                    inner.styles[style], inner.concepts[concept]
+                );
                 inner.errors.push(label);
             }
         }
@@ -73,10 +76,7 @@ impl Progress {
             let status = if result.is_ok() { "ok" } else { "error" };
             println!(
                 "[{status}] {} x {} ({}/{})",
-                inner.styles[style],
-                inner.concepts[concept],
-                cell.done,
-                cell.total
+                inner.styles[style], inner.concepts[concept], cell.done, cell.total
             );
             return;
         }
@@ -110,7 +110,11 @@ impl Progress {
         let mut lines = Vec::with_capacity(inner.concepts.len() + 1);
         let mut header = format!("{:width$}", "", width = label_width);
         for style in &inner.styles {
-            header.push_str(&format!("  {:^width$}", truncate(style, MAX_LABEL), width = col_width));
+            header.push_str(&format!(
+                "  {:^width$}",
+                truncate(style, MAX_LABEL),
+                width = col_width
+            ));
         }
         lines.push(header);
         for c in 0..inner.concepts.len() {
@@ -178,7 +182,11 @@ mod tests {
     use super::*;
 
     fn cell(total: usize, done: usize, failed: usize) -> Cell {
-        Cell { total, done, failed }
+        Cell {
+            total,
+            done,
+            failed,
+        }
     }
 
     #[test]

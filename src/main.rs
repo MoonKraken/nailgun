@@ -12,9 +12,9 @@ use tokio::task::JoinSet;
 
 use frontmatter::Config;
 use progress::Progress;
-use provider::ImageProvider;
+use provider::{ImageProvider, ProviderKind};
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(version, about = "Generate YouTube thumbnails from script frontmatter")]
 struct Args {
     /// Path to the script markdown file
@@ -22,6 +22,9 @@ struct Args {
     /// Number of thumbnails to generate per style/concept combination
     #[arg(default_value_t = 1)]
     count: usize,
+    /// Image generation provider
+    #[arg(long, value_enum, default_value_t = ProviderKind::NanoBananaPro)]
+    provider: ProviderKind,
 }
 
 #[tokio::main]
@@ -41,10 +44,9 @@ async fn main() -> Result<()> {
         .parent()
         .unwrap_or(Path::new("."))
         .join("nailgun");
-    std::fs::create_dir_all(&out_dir)
-        .with_context(|| format!("creating {}", out_dir.display()))?;
+    std::fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
 
-    let provider = provider::default_provider()?;
+    let provider = provider::from_kind(args.provider)?;
     eprintln!("provider: {}", provider.name());
 
     // `None` represents the no-styles case: concepts are generated without a style line.
@@ -139,6 +141,7 @@ fn sanitize(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     #[test]
     fn prompt_with_style() {
@@ -167,5 +170,32 @@ mod tests {
             output_filename(123, Some("dark mode"), "my logo", 1),
             "123_dark_mode_my_logo_1"
         );
+    }
+
+    #[test]
+    fn provider_defaults_to_nano_banana_pro() {
+        let args = Args::try_parse_from(["nailgun", "script.md"]).unwrap();
+        assert_eq!(args.provider, ProviderKind::NanoBananaPro);
+        assert_eq!(args.count, 1);
+    }
+
+    #[test]
+    fn provider_can_be_selected() {
+        let args = Args::try_parse_from(["nailgun", "--provider", "gpt-image-2", "script.md", "2"])
+            .unwrap();
+        assert_eq!(args.provider, ProviderKind::GptImage2);
+        assert_eq!(args.count, 2);
+    }
+
+    #[test]
+    fn nano_banana_alias_is_accepted() {
+        let args =
+            Args::try_parse_from(["nailgun", "--provider", "nano-banana", "script.md"]).unwrap();
+        assert_eq!(args.provider, ProviderKind::NanoBananaPro);
+    }
+
+    #[test]
+    fn unknown_provider_is_rejected() {
+        assert!(Args::try_parse_from(["nailgun", "--provider", "dall-e-3", "script.md"]).is_err());
     }
 }

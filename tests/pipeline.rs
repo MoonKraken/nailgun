@@ -3,13 +3,12 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // 1x1 red pixel PNG
-const PNG_B64: &str =
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+const PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -20,9 +19,7 @@ fn temp_dir(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!("nailgun-{tag}-{}-{nanos}", std::process::id()))
 }
 
-#[test]
-fn full_pipeline_against_mock() {
-    // Mock Gemini API: responds to the single generateContent POST with a PNG part.
+fn serve_json_once(body: String) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {
@@ -39,17 +36,17 @@ fn full_pipeline_against_mock() {
             }
             request.extend_from_slice(&buf[..n]);
         }
-        let body = format!(
-            r#"{{"candidates":[{{"content":{{"parts":[{{"inlineData":{{"mimeType":"image/png","data":"{PNG_B64}"}}}}]}}}}]}}"#
-        );
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         stream.write_all(response.as_bytes()).unwrap();
     });
+    port
+}
 
-    let dir = temp_dir("pipeline");
+fn write_script(tag: &str) -> (PathBuf, PathBuf) {
+    let dir = temp_dir(tag);
     std::fs::create_dir_all(&dir).unwrap();
     let script = dir.join("script.md");
     std::fs::write(
@@ -57,6 +54,28 @@ fn full_pipeline_against_mock() {
         "---\nnailgun:\n    concepts:\n        dot: A red dot\n---\n",
     )
     .unwrap();
+    (dir, script)
+}
+
+fn assert_single_png(dir: &Path) {
+    let files: Vec<_> = std::fs::read_dir(dir.join("nailgun"))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(files.len(), 1);
+    let path = files[0].path();
+    assert_eq!(path.extension().unwrap(), "png");
+    assert!(std::fs::read(&path).unwrap().starts_with(PNG_MAGIC));
+}
+
+#[test]
+fn full_pipeline_against_mock() {
+    // Mock Gemini API: responds to the single generateContent POST with a PNG part.
+    let body = format!(
+        r#"{{"candidates":[{{"content":{{"parts":[{{"inlineData":{{"mimeType":"image/png","data":"{PNG_B64}"}}}}]}}}}]}}"#
+    );
+    let port = serve_json_once(body);
+    let (dir, script) = write_script("pipeline");
 
     let output = Command::new(env!("CARGO_BIN_EXE_nailgun"))
         .arg(&script)
@@ -70,15 +89,35 @@ fn full_pipeline_against_mock() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let files: Vec<_> = std::fs::read_dir(dir.join("nailgun"))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(files.len(), 1);
-    let path = files[0].path();
-    assert_eq!(path.extension().unwrap(), "png");
-    assert!(std::fs::read(&path).unwrap().starts_with(PNG_MAGIC));
+    assert_single_png(&dir);
+    std::fs::remove_dir_all(&dir).ok();
+}
 
+#[test]
+fn gpt_image_2_pipeline_against_mock() {
+    let body =
+        format!(r#"{{"created":0,"output_format":"png","data":[{{"b64_json":"{PNG_B64}"}}]}}"#);
+    let port = serve_json_once(body);
+    let (dir, script) = write_script("pipeline-gpt");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nailgun"))
+        .args(["--provider", "gpt-image-2"])
+        .arg(&script)
+        .env("OPENAI_API_KEY", "mock-key")
+        .env_remove("GEMINI_API_KEY")
+        .env_remove("GOOGLE_API_KEY")
+        .env("NAILGUN_API_BASE", format!("http://127.0.0.1:{port}"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("provider: gpt-image-2"), "stderr: {stderr}");
+
+    assert_single_png(&dir);
     std::fs::remove_dir_all(&dir).ok();
 }
 
