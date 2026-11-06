@@ -33,6 +33,9 @@ pub enum ProviderKind {
     #[default]
     #[value(alias = "nano-banana")]
     NanoBananaPro,
+    /// Google Nano Banana 2.1.
+    #[value(name = "nano-banana-2.1")]
+    NanoBanana21,
     /// OpenAI GPT Image 2.
     #[value(name = "gpt-image-2")]
     GptImage2,
@@ -40,7 +43,8 @@ pub enum ProviderKind {
 
 pub fn from_kind(kind: ProviderKind) -> Result<Arc<dyn ImageProvider>> {
     match kind {
-        ProviderKind::NanoBananaPro => Ok(Arc::new(NanoBanana::from_env()?)),
+        ProviderKind::NanoBananaPro => Ok(Arc::new(NanoBanana::pro()?)),
+        ProviderKind::NanoBanana21 => Ok(Arc::new(NanoBanana::v2_1()?)),
         ProviderKind::GptImage2 => Ok(Arc::new(GptImage2::from_env()?)),
     }
 }
@@ -63,32 +67,46 @@ fn api_error(status: reqwest::StatusCode, text: String) -> anyhow::Error {
     anyhow::anyhow!("API error {status}: {message}")
 }
 
-/// Google's nano banana pro (Gemini 3 Pro Image) via the Gemini API.
+/// Google's nano banana image models via the Gemini API `generateContent`
+/// endpoint. Variants differ only by model id.
 pub struct NanoBanana {
     client: reqwest::Client,
     api_key: String,
+    model: &'static str,
+    name: &'static str,
 }
 
 impl NanoBanana {
-    const MODEL: &'static str = "gemini-3-pro-image";
     const API_BASE: &'static str = "https://generativelanguage.googleapis.com";
 
-    pub fn from_env() -> Result<Self> {
+    /// Nano banana pro (Gemini 3 Pro Image).
+    pub fn pro() -> Result<Self> {
+        Self::from_env("gemini-3-pro-image", "nano-banana-pro")
+    }
+
+    /// Nano Banana 2.1.
+    pub fn v2_1() -> Result<Self> {
+        Self::from_env("gemini-nano-banana-2.1", "nano-banana-2.1")
+    }
+
+    fn from_env(model: &'static str, name: &'static str) -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY")
             .or_else(|_| std::env::var("GOOGLE_API_KEY"))
-            .context("set GEMINI_API_KEY to use the nano banana pro provider")?;
+            .with_context(|| format!("set GEMINI_API_KEY to use the {name} provider"))?;
         Ok(Self {
             client: http_client()?,
             api_key,
+            model,
+            name,
         })
     }
 
-    fn url() -> String {
+    fn url(&self) -> String {
         // Overridable to point at a mock server in tests.
         format!(
             "{}/v1beta/models/{}:generateContent",
             api_base(Self::API_BASE),
-            Self::MODEL
+            self.model
         )
     }
 }
@@ -137,7 +155,7 @@ fn extension_for(mime_type: &str) -> Result<&'static str> {
 #[async_trait]
 impl ImageProvider for NanoBanana {
     fn name(&self) -> &'static str {
-        "nano-banana-pro"
+        self.name
     }
 
     async fn generate(&self, prompt: &str) -> Result<GeneratedImage> {
@@ -150,7 +168,7 @@ impl ImageProvider for NanoBanana {
         });
         let response = self
             .client
-            .post(Self::url())
+            .post(self.url())
             .header("x-goog-api-key", &self.api_key)
             .json(&body)
             .send()

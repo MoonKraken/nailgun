@@ -20,9 +20,14 @@ fn temp_dir(tag: &str) -> PathBuf {
 }
 
 fn serve_json_once(body: String) -> u16 {
+    serve_json_once_capturing(body).0
+}
+
+/// Like [`serve_json_once`], but also yields the raw request bytes received.
+fn serve_json_once_capturing(body: String) -> (u16, std::thread::JoinHandle<Vec<u8>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
+    let handle = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
@@ -41,8 +46,9 @@ fn serve_json_once(body: String) -> u16 {
             body.len()
         );
         stream.write_all(response.as_bytes()).unwrap();
+        request
     });
-    port
+    (port, handle)
 }
 
 fn write_script(tag: &str) -> (PathBuf, PathBuf) {
@@ -87,6 +93,35 @@ fn full_pipeline_against_mock() {
         output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_single_png(&dir);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn nano_banana_2_1_pipeline_against_mock() {
+    let body = format!(
+        r#"{{"candidates":[{{"content":{{"parts":[{{"inlineData":{{"mimeType":"image/png","data":"{PNG_B64}"}}}}]}}}}]}}"#
+    );
+    let (port, request) = serve_json_once_capturing(body);
+    let (dir, script) = write_script("pipeline-nb21");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nailgun"))
+        .args(["--provider", "nano-banana-2.1"])
+        .arg(&script)
+        .env("GEMINI_API_KEY", "mock-key")
+        .env("NAILGUN_API_BASE", format!("http://127.0.0.1:{port}"))
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    assert!(stderr.contains("provider: nano-banana-2.1"), "stderr: {stderr}");
+
+    let request = String::from_utf8_lossy(&request.join().unwrap()).into_owned();
+    assert!(
+        request.starts_with("POST /v1beta/models/gemini-nano-banana-2.1:generateContent "),
+        "request: {request}"
     );
 
     assert_single_png(&dir);

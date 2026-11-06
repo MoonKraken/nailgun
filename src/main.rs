@@ -195,6 +195,13 @@ mod tests {
     }
 
     #[test]
+    fn nano_banana_2_1_can_be_selected() {
+        let args =
+            Args::try_parse_from(["nailgun", "--provider", "nano-banana-2.1", "script.md"]).unwrap();
+        assert_eq!(args.provider, ProviderKind::NanoBanana21);
+    }
+
+    #[test]
     fn unknown_provider_is_rejected() {
         assert!(Args::try_parse_from(["nailgun", "--provider", "dall-e-3", "script.md"]).is_err());
     }
